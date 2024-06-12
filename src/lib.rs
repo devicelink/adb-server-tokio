@@ -16,7 +16,7 @@
 //!
 //! # References
 //!
-//! - [ADB Protocol](https://android.googlesource.com/platform/system/core/+/master/adb/protocol.txt)
+//! - [ADB Protocol](https://cs.android.com/android/platform/superproject/main/+/main:packages/modules/adb/protocol.txt)
 //!
 
 mod util;
