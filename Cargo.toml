@@ -1,6 +1,6 @@
 [package]
 name = "adb-server-tokio"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
 description = "A Rust implementation of the Android Debug Bridge (ADB) server protocol."
 authors = ["Andreas Lüdeke <andreas@devicelink.app>"]
