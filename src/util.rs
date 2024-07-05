@@ -1,3 +1,4 @@
+use std::array::TryFromSliceError;
 use thiserror::Error;
 
 /// Result type for AdbServer errors.
@@ -9,8 +10,12 @@ pub enum AdbServerError {
     /// IO error.
     #[error(transparent)]
     IOError(#[from] std::io::Error),
-    // #[error(transparent)]
-    // Utf8StringError(#[from] std::str::Utf8Error),
+    /// TryFromSliceError
+    #[error(transparent)]
+    TryFromSliceError(#[from] TryFromSliceError),
+    /// Other Errors
+    #[error("AdbServerError: {}", .0)]
+    Error(String),
     // #[error(transparent)]
     // ParseIntError(#[from] std::num::ParseIntError),
     // #[error("FAILED response status: {0}")]

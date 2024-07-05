@@ -3,7 +3,7 @@ use futures::{SinkExt, StreamExt};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::trace;
 
-use crate::AdbServerProtocolConnection;
+use crate::{AdbServerProtocolConnection, Result};
 
 enum Direction {
     IncomingToOutgoing,
@@ -19,14 +19,41 @@ impl std::fmt::Display for Direction {
     }
 }
 
+/// Configuration for the AdbServerProxy
+#[derive(Debug)]
+pub struct AdbServerProxyConfig {
+    /// Override the maximum ADB packet size inside the proxy
+    pub max_adb_packet_size: Option<u32>,
+}
+
+impl AdbServerProxyConfig {
+    /// Set the maximum ADB packet size
+    pub fn max_adb_packet_size(mut self, max_adb_packet_size: u32) -> Self {
+        self.max_adb_packet_size = Some(max_adb_packet_size);
+        self
+    }
+}
+
+impl Default for AdbServerProxyConfig {
+    fn default() -> Self {
+        AdbServerProxyConfig {
+            max_adb_packet_size: None,
+        }
+    }
+}
+
 /// a proxy which connects 2 adb server protocol connections and optionally logs the messages
 #[derive(Debug)]
-pub struct AdbServerProxy {}
+pub struct AdbServerProxy {
+    config: AdbServerProxyConfig,
+}
 
 impl AdbServerProxy {
     /// Create a new AdbServerProxy.
-    pub fn new() -> AdbServerProxy {
-        AdbServerProxy {}
+    pub fn new(config: Option<AdbServerProxyConfig>) -> AdbServerProxy {
+        AdbServerProxy {
+            config: config.unwrap_or_default(),
+        }
     }
 
     /// Proxy the incoming stream to the outgoing stream.
@@ -46,27 +73,37 @@ impl AdbServerProxy {
         loop {
             tokio::select! {
                 packet = incoming_stream.next() => {
-                    match packet {
-                        Some(Ok(packet)) => {
-                            trace_message(connection_id, Direction::IncomingToOutgoing, &packet);
-                            outgoing_stream.send(packet).await.unwrap();
-                        },
-                        Some(Err(e)) => return Err(e),
-                        None => return Ok(()),
-                    }
+                    self.forward(connection_id, packet, &mut outgoing_stream, Direction::IncomingToOutgoing).await.unwrap();
+
                 }
                 packet = outgoing_stream.next() => {
-                    match packet {
-                        Some(Ok(packet)) => {
-                            trace_message(connection_id, Direction::OutgoingToIncoming, &packet);
-                            incoming_stream.send(packet).await.unwrap();
-                        },
-                        Some(Err(e)) => return Err(e),
-                        None => return Ok(()),
-                    }
+                    self.forward(connection_id, packet, &mut incoming_stream, Direction::OutgoingToIncoming).await.unwrap();
                 }
             }
         }
+    }
+
+    async fn forward(&self, connection_id: u32, packet: Option<Result<crate::AdbPacket>>, outgoing_stream: &mut crate::AdbServerProtocolConnection<impl AsyncRead + AsyncWrite + Unpin>, direction: Direction) -> Result<()> {
+        match packet {
+            Some(Ok(mut packet)) => {
+                trace_message(connection_id, direction, &packet);
+                if let Some(max_size) = self.config.max_adb_packet_size {
+                    override_max_adb_packet_size_on_connect(&mut packet, max_size);
+                }
+                outgoing_stream.send(packet).await
+            },
+            Some(Err(e)) => return Err(e),
+            None => return Ok(()),
+        }
+    }
+}
+
+fn override_max_adb_packet_size_on_connect(packet: &mut crate::AdbPacket, max_size: u32) {
+    match packet.header.command {
+        crate::Command::A_CNXN => {
+            packet.header.arg1 = max_size;
+        },
+        _ => {}
     }
 }
 
@@ -92,7 +129,7 @@ mod tests {
         let connecting_addr = "127.0.0.1:5555".parse::<SocketAddr>().unwrap();
 
         let listener = tokio::net::TcpListener::bind(listening_addr).await?;
-        let proxy = Arc::new(AdbServerProxy::new());
+        let proxy = Arc::new(AdbServerProxy::new(None));
         loop {
             let proxy = Arc::clone(&proxy);
             let (incoming_stream, _) = listener.accept().await?;
